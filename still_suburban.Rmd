@@ -1,0 +1,95 @@
+---
+title: "Still Suburban"
+author:
+- Nathan Lauster
+- Dmitry Shkolnik
+- Jens von Bergmann
+date: '2018-08-21'
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE,
+	fig.width = 9
+)
+library(tidyverse)
+library(cancensus)
+library(cancensusHelpers)
+library(tongfen)
+```
+
+```{r}
+commute_vars_2016 <- search_census_vectors("Main mode of commuting","CA16","Total") %>% 
+  bind_rows(child_census_vectors(.))
+commute_vars_2006 <- search_census_vectors("mode of","CA06","Total") %>% 
+  bind_rows(child_census_vectors(.))
+all_vectors <- c(commute_vars_2006$vector,commute_vars_2016$vector)
+cmas <- list_census_regions("CA16") %>% filter(level=="CMA")
+
+canada_data <- get_census("CA16",regions=list(C="01"),vectors = all_vectors,level="Regions",labels ="short") %>%
+  mutate(`Active 2006`=(v_CA06_1104+v_CA06_1105)/v_CA06_1100,
+           `Transit 2006`=(v_CA06_1103)/v_CA06_1100,
+           `Active 2016`=(v_CA16_5804+v_CA16_5807)/v_CA16_5792,
+           `Transit 2016`=(v_CA16_5801)/v_CA16_5792)
+
+type_colors <- c("Unclassified"="#808080","Exurban"="#ffffff","Auto Suburb"="#FDFFB0","Transit Suburb"="#E0E507","Active Core"="#989A07")
+
+data_for_region <- function(region){
+  data <- get_tongfen_census_ct(region %>% as_census_region_list,
+                                vectors=all_vectors,geo_format='sf') %>%
+    mutate(`Density 2006`=Population_CA06/`Shape Area`,
+           `Density 2016`=Population_CA16/`Shape Area`,
+           `Active 2006`=(v_CA06_1104+v_CA06_1105)/v_CA06_1100,
+           `Transit 2006`=(v_CA06_1103)/v_CA06_1100,
+           `Active 2016`=(v_CA16_5804+v_CA16_5807)/v_CA16_5792,
+           `Transit 2016`=(v_CA16_5801)/v_CA16_5792
+           ) %>%
+    left_join((.) %>% 
+                st_set_geometry(NULL) %>%
+                select(all_vectors,"Population_CA06","Population_CA16","Shape Area","CMA_UID") %>%
+                group_by(CMA_UID) %>%
+                summarize_all(sum,na.rm=TRUE) %>%
+                set_names(paste0("CMA_",names(.))),by=c("CMA_UID"="CMA_CMA_UID")) %>%
+    mutate(`CMA_Density 2006`=CMA_Population_CA06/`CMA_Shape Area`,
+           `CMA_Density 2016`=CMA_Population_CA16/`CMA_Shape Area`,
+           `CMA_Active 2006`=(CMA_v_CA06_1104+CMA_v_CA06_1105)/CMA_v_CA06_1100,
+           `CMA_Transit 2006`=(CMA_v_CA06_1103)/CMA_v_CA06_1100,
+           `CMA_Active 2016`=(CMA_v_CA16_5804+CMA_v_CA16_5807)/CMA_v_CA16_5792,
+           `CMA_Transit 2016`=(CMA_v_CA16_5801)/CMA_v_CA16_5792) %>%
+    mutate(Type=case_when(
+      `Density 2016`<150 ~ "Exurban",
+       `Active 2016` < 1.5* `CMA_Active 2016` & `Transit 2016` < 1.5* `CMA_Transit 2016` ~ "Auto Suburb",
+      `Active 2016` < 1.5* `CMA_Active 2016` & `Transit 2016` >= 1.5* `CMA_Transit 2016` & `Transit 2016` > 0.5 * canada_data$`Transit 2016` ~ "Transit Suburb",
+      `Active 2016` > 0.5 * canada_data$`Active 2016` ~ "Active Core",
+      TRUE ~ "Unclassified"
+    )) %>%
+    mutate(Type=factor(Type,levels=names(type_colors)))
+  data
+}
+```
+
+## Questions
+I have a couple of questions regarding the classification. The categories in the [working paper](http://www.canadianurbanism.ca/wp-content/uploads/2018/08/Still-Suburban-report-For-Release-comp.pdf) aren't mutually exclusive, leaving "unclassified" areas. One such category is a tract with transit use > 150% of CMA but less than 50% of national average that is not an urban core. Similarly, a tract with active transport > 150% of CMA average but less than 50% of national average is unclassified (even if transit use is high). Lastly, I don't understand the definition of "Exurb", in particular the exact meaning of "more than 50% of workers commuting into the metropolitan area".
+
+## Geographies
+To facility temporal comparisons between 2006 and 2016 data we chose a common tiling of CTs for those two regions and aggregate the data accrodingly using the [tongfen package](https://github.com/mountainMath/tongfen).
+
+
+## Vancouver region
+```{r}
+
+data <- data_for_region(cmas %>% filter(grepl("Vancouver",name)))
+
+
+ggplot(data,aes(fill=Type)) +
+  geom_sf(size=0.1) +
+  theme_void() +
+  scale_fill_manual(values=type_colors) +
+  coord_sf(datum=NA)
+```
+
