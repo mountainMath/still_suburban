@@ -21,6 +21,7 @@ library(tidyverse)
 library(cancensus)
 library(cancensusHelpers)
 library(tongfen)
+library(sf)
 ```
 
 ```{r}
@@ -39,7 +40,7 @@ canada_data <- get_census("CA16",regions=list(C="01"),vectors = all_vectors,leve
 
 type_colors <- c("Unclassified"="#808080","Exurban"="#ffffff","Auto Suburb"="#FDFFB0","Transit Suburb"="#E0E507","Active Core"="#989A07")
 
-data_for_region <- function(region){
+tongfen_data_for_region <- function(region){
   data <- get_tongfen_census_ct(region %>% as_census_region_list,
                                 vectors=all_vectors,geo_format='sf') %>%
     mutate(`Density 2006`=Population_CA06/`Shape Area`,
@@ -71,20 +72,51 @@ data_for_region <- function(region){
     mutate(Type=factor(Type,levels=names(type_colors)))
   data
 }
+
+
+data_for_region <- function(region,geo_level="CT"){
+  vectors <- commute_vars_2016$vector
+  data <- get_census("CA16",
+                     region %>% as_census_region_list,
+                     level=geo_level,
+                     label="short",
+                     vectors=vectors,
+                     geo_format='sf') %>%
+    mutate(`Density`=Population/`Shape Area`,
+           `Active`=(v_CA16_5804+v_CA16_5807)/v_CA16_5792,
+           `Transit`=(v_CA16_5801)/v_CA16_5792
+           ) %>%
+    left_join((.) %>% 
+                st_set_geometry(NULL) %>%
+                select(vectors,"Population","Shape Area","CMA_UID") %>%
+                group_by(CMA_UID) %>%
+                summarize_all(sum,na.rm=TRUE) %>%
+                set_names(paste0("CMA_",names(.))),by=c("CMA_UID"="CMA_CMA_UID")) %>%
+    mutate(`CMA_Density`=CMA_Population/`CMA_Shape Area`,
+           `CMA_Active`=(CMA_v_CA16_5804+CMA_v_CA16_5807)/CMA_v_CA16_5792,
+           `CMA_Transit`=(CMA_v_CA16_5801)/CMA_v_CA16_5792) %>%
+    mutate(Type=case_when(
+      `Density`<150 ~ "Exurban",
+       `Active` < 1.5* `CMA_Active` & `Transit` < 1.5* `CMA_Transit` ~ "Auto Suburb",
+      `Active` < 1.5* `CMA_Active` & `Transit` >= 1.5* `CMA_Transit` & `Transit` > 0.5 * canada_data$`Transit 2016` ~ "Transit Suburb",
+      `Active` > 0.5 * canada_data$`Active 2016` ~ "Active Core",
+      TRUE ~ "Unclassified"
+    )) %>%
+    mutate(Type=factor(Type,levels=names(type_colors)))
+  data
+}
 ```
 
 ## Questions
 I have a couple of questions regarding the classification. The categories in the [working paper](http://www.canadianurbanism.ca/wp-content/uploads/2018/08/Still-Suburban-report-For-Release-comp.pdf) aren't mutually exclusive, leaving "unclassified" areas. One such category is a tract with transit use > 150% of CMA but less than 50% of national average that is not an urban core. Similarly, a tract with active transport > 150% of CMA average but less than 50% of national average is unclassified (even if transit use is high). Lastly, I don't understand the definition of "Exurb", in particular the exact meaning of "more than 50% of workers commuting into the metropolitan area".
 
 ## Geographies
-To facility temporal comparisons between 2006 and 2016 data we chose a common tiling of CTs for those two regions and aggregate the data accrodingly using the [tongfen package](https://github.com/mountainMath/tongfen).
+We can chose to map the data on 2016 geography, or on a common tiling for 2006 and 2016 census tracts using the [tongfen package](https://github.com/mountainMath/tongfen). If we use data from a single census we have the choice between using CT or DA level data.
 
 
 ## Vancouver region
 ```{r}
-
-data <- data_for_region(cmas %>% filter(grepl("Vancouver",name)))
-
+data <- data_for_region(cmas %>% filter(grepl("Vancouver",name)),"CT")
 
 ggplot(data,aes(fill=Type)) +
   geom_sf(size=0.1) +
@@ -93,3 +125,48 @@ ggplot(data,aes(fill=Type)) +
   coord_sf(datum=NA)
 ```
 
+## Toronto
+```{r}
+data <- data_for_region(cmas %>% filter(grepl("Toronto",name)))
+
+ggplot(data,aes(fill=Type)) +
+  geom_sf(size=0.1) +
+  theme_void() +
+  scale_fill_manual(values=type_colors) +
+  coord_sf(datum=NA)
+```
+
+## Montreal
+```{r}
+data <- data_for_region(cmas %>% filter(grepl("Montr",name)))
+
+ggplot(data,aes(fill=Type)) +
+  geom_sf(size=0.1) +
+  theme_void() +
+  scale_fill_manual(values=type_colors) +
+  coord_sf(datum=NA)
+```
+
+## Calgary
+```{r}
+data <- data_for_region(cmas %>% filter(grepl("Calgary",name)))
+
+ggplot(data,aes(fill=Type)) +
+  geom_sf(size=0.1) +
+  theme_void() +
+  scale_fill_manual(values=type_colors) +
+  coord_sf(datum=NA)
+```
+
+
+## Vancouver DA level
+
+```{r}
+data <- data_for_region(cmas %>% filter(grepl("Vancouver",name)),"DA")
+
+ggplot(data,aes(fill=Type)) +
+  geom_sf(size=0.1) +
+  theme_void() +
+  scale_fill_manual(values=type_colors) +
+  coord_sf(datum=NA)
+```
