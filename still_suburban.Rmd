@@ -64,6 +64,7 @@ tongfen_data_for_region <- function(region){
            `CMA_Transit 2016`=(CMA_v_CA16_5801)/CMA_v_CA16_5792) %>%
     mutate(Type=case_when(
       `Density 2016`<150 ~ "Exurban",
+      is.na(`Active 2016`) | is.na(`Transit 2016`) ~ "Unclassified",
        `Active 2016` < 1.5* `CMA_Active 2016` & `Transit 2016` < 1.5* `CMA_Transit 2016` ~ "Auto Suburb",
       `Active 2016` < 1.5* `CMA_Active 2016` & `Transit 2016` >= 1.5* `CMA_Transit 2016` & `Transit 2016` > 0.5 * canada_data$`Transit 2016` ~ "Transit Suburb",
       `Active 2016` > 0.5 * canada_data$`Active 2016` ~ "Active Core",
@@ -97,6 +98,7 @@ data_for_region <- function(region,geo_level="CT"){
            `CMA_Transit`=(CMA_v_CA16_5801)/CMA_v_CA16_5792) %>%
     mutate(Type=case_when(
       `Density`<150 ~ "Exurban",
+      is.na(`Active`) | is.na(`Transit`) ~ "Unclassified",
        `Active` < 1.5* `CMA_Active` & `Transit` < 1.5* `CMA_Transit` ~ "Auto Suburb",
       `Active` < 1.5* `CMA_Active` & `Transit` >= 1.5* `CMA_Transit` & `Transit` > 0.5 * canada_data$`Transit 2016` ~ "Transit Suburb",
       `Active` > 0.5 * canada_data$`Active 2016` ~ "Active Core",
@@ -169,4 +171,47 @@ ggplot(data,aes(fill=Type)) +
   theme_void() +
   scale_fill_manual(values=type_colors) +
   coord_sf(datum=NA)
+```
+
+
+## K-menas clustering
+We cluster based on transit mode share, active transport mode share and density.
+```{r}
+library(broom)
+
+kd <- data %>% 
+  mutate(Density=log(Density+1),
+         Active=log(Active+1),
+         Transit=log(Transit+1)) %>%
+  mutate(Density=Density/max(Density,na.rm=TRUE),
+         Active=Active/max(Active,na.rm=TRUE),
+         Transit=Transit/max(Transit,na.rm=TRUE)) %>%
+  select(Density,Active,Transit) %>%
+  na.omit()
+
+clusters <- kmeans(kd %>%   st_set_geometry(NULL),4 )
+
+kd$cluster <- as.factor(clusters$cluster)
+
+ggplot(kd, aes(fill=cluster)) +
+  geom_sf() +
+  coord_sf(datum=NA)
+
+```
+
+### Projections
+```{r}
+ggplot(kd,aes(x=Density,y=Transit,color=cluster)) +
+  geom_point()
+```
+
+```{r}
+ggplot(kd,aes(x=Density,y=Active,color=cluster)) +
+  geom_point()
+```
+
+
+```{r}
+ggplot(kd,aes(x=Active,y=Transit,color=cluster)) +
+  geom_point()
 ```
