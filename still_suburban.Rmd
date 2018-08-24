@@ -32,6 +32,8 @@ commute_vars_2006 <- search_census_vectors("mode of","CA06","Total") %>%
 all_vectors <- c(commute_vars_2006$vector,commute_vars_2016$vector)
 cmas <- list_census_regions("CA16") %>% filter(level=="CMA")
 
+cma_names=setNames(cmas$name,cmas$region)
+
 canada_data <- get_census("CA16",regions=list(C="01"),vectors = all_vectors,level="Regions",labels ="short") %>%
   mutate(`Active 2006`=(v_CA06_1104+v_CA06_1105)/v_CA06_1100,
            `Transit 2006`=(v_CA06_1103)/v_CA06_1100,
@@ -215,3 +217,52 @@ ggplot(kd,aes(x=Density,y=Active,color=cluster)) +
 ggplot(kd,aes(x=Active,y=Transit,color=cluster)) +
   geom_point()
 ```
+
+
+
+
+# Population growth
+
+```{r}
+
+cma_name <- "Vancouver|Toronto|Montr|Calgar"
+data <- tongfen_data_for_region(cmas %>% filter(grepl(cma_name,name))) 
+  
+plot_data <- data %>% 
+  filter(Type!="Unclassified") %>%
+  st_set_geometry(NULL) %>%
+  group_by(CMA_UID,Type) %>%
+  summarize(Population_CA06=sum(Population_CA06),Population_CA16=sum(Population_CA16)) %>%
+  mutate(Type=factor(Type,levels=names(type_colors))) %>%
+  mutate(abs_change=Population_CA16-Population_CA06) %>%
+  mutate(change=abs_change/Population_CA06) %>%
+  mutate(rel_change=abs_change/sum(abs_change)) %>%
+  mutate(ymax=cumsum(rel_change)) %>%
+  mutate(ymin=c(0, head(.data$ymax, n=-1))) %>%
+  mutate(y=(ymin+ymax)/2)
+
+ggplot(plot_data, aes(fill=Type, ymax=ymax, ymin=ymin, xmax=4, xmin=2,label=scales::percent(rel_change))) +
+  geom_rect(colour="grey30") +
+  coord_polar(theta="y") +
+  xlim(c(0, 4)) +
+  theme_bw() +
+  geom_text(x=3,aes(y=y)) +
+  facet_wrap("CMA_UID",labeller = as_labeller(cma_names)) +
+  scale_fill_manual(values=type_colors) +
+  theme(panel.grid=element_blank(),
+        axis.text=element_blank(),
+        axis.ticks=element_blank()) +
+  labs(title="Proportion of population growth by region type",y="")
+```
+
+
+```{r}
+ggplot(plot_data, aes(fill=Type, x=CMA_UID,y=rel_change,label=scales::percent(rel_change))) +
+  geom_bar(stat="identity",position="dodge") +
+  geom_text(vjust=-1,position = position_dodge(width = 1)) +
+  scale_x_discrete(labels=cma_names) +
+  scale_y_continuous(labels=scales::percent) +
+  scale_fill_manual(values=type_colors) +
+  labs(title="Proportion of population growth by region type",y="")
+```
+
